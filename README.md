@@ -375,6 +375,47 @@ activity: "Hello {Global.UserName}, your agent: {Global.AgentName}"
         # ... actions if true
 ```
 
+### Error 8: AnswerQuestionWithAI Automatic Display Issue (Common)
+**Root Cause**: AnswerQuestionWithAI automatically displays its response immediately after execution, which causes duplication if you try to display the response manually.
+
+**The Problem**: This creates duplicate messages that confuse users.
+
+```yaml
+# WRONG ❌ - Causes duplicate display
+- kind: AnswerQuestionWithAI
+  id: ai_GenerateResponse
+  variable: Global.AIResponse
+  userInput: =Global.UserInput
+  question: "Generate a helpful response about this topic."
+
+# This creates a duplicate! The AI already displayed above
+- kind: SendActivity
+  id: sendActivity_ShowAI
+  activity: "Here's my response: {Global.AIResponse}"
+
+# CORRECT ✅ - Let AI display automatically, no manual display needed
+- kind: AnswerQuestionWithAI
+  id: ai_GenerateResponse
+  variable: Global.AIResponse
+  userInput: =Global.UserInput
+  question: "Generate a helpful response about this topic."
+
+# Continue directly to next action - AI response appears automatically above
+- kind: Question
+  id: question_NextStep
+  interruptionPolicy:
+    allowInterruption: true
+  variable: init:Global.NextInput
+  prompt: "What would you like to do next?"
+  entity: StringPrebuiltEntity
+```
+
+**Key Points about AnswerQuestionWithAI:**
+- **Always displays response immediately** - cannot be suppressed
+- **Store response in variable** for potential use in logic, but don't display manually
+- **No way to prevent automatic display** - this is intended behavior
+- **Plan conversation flow accordingly** - next Question/SendActivity comes after AI response appears
+
 ## Part 4: Best Practices (Updated)
 
 ### Practice 1: Use the Complete Question Template
@@ -497,7 +538,7 @@ Use descriptive, consistent IDs:
 
 ### ⚠️ Use With Caution
 - **GotoAction** - Only for simple loops back to recent questions, unreliable for complex flow control
-- **AnswerQuestionWithAI** - Good for conversational content generation, NOT for structured data that needs parsing
+- **AnswerQuestionWithAI** - Good for conversational content generation, BUT automatically displays responses (see Error 8)
 - **Dialog scope variables** - Can cause recognition errors, prefer Global or Topic scope
 
 ### ❌ Unsupported or Unreliable
