@@ -718,3 +718,216 @@ When your bot isn't working:
 - ✅ Keep logic within single ConditionGroup blocks when possible
 
 This guide reflects the current, tested, and verified syntax for Copilot Studio as of September 2024. Following these patterns will result in reliable, predictable bot behavior.
+
+# Guide Updates - New Discoveries from Testing
+
+## Part 8: Advanced Troubleshooting (Updated from Real-World Testing)
+
+### Critical Discovery: ConditionGroup Reliability Issues
+
+**Problem**: ConditionGroup actions may not work reliably in all Copilot Studio environments.
+
+**Symptoms**:
+- Bot execution stops after SetVariable actions
+- Questions are skipped entirely
+- ConditionGroup conditions appear to evaluate but actions don't execute
+- No error messages, just silent failure
+
+**Root Cause**: Environmental compatibility issues with ConditionGroup in certain Copilot Studio deployments.
+
+**Solutions**:
+1. **Use separate topics instead of complex ConditionGroup logic**
+2. **Implement linear flows with conditional prompts** (but see limitations below)
+3. **Test ConditionGroup thoroughly in your specific environment before deploying**
+
+### Power Fx Formula Limitations in Text Fields
+
+**Critical Discovery**: Power Fx formulas (=If(), =Concatenate(), etc.) work in `value:` fields but NOT in `activity:` or `prompt:` fields in some environments.
+
+**Problem Symptoms**:
+```yaml
+# This displays as raw text instead of executing
+prompt: =If(Global.PathType = "BUILT", "Built question", "Skip")
+# User sees: "=If(Global.PathType = "BUILT", "Built question", "Skip")"
+```
+
+**Working Solution**:
+```yaml
+# Use SetVariable to create conditional text first
+- kind: SetVariable
+  id: setVariable_CreatePrompt
+  variable: Global.DynamicPrompt
+  value: =If(Global.PathType = "BUILT", "Built question", "Skip")
+
+# Then use variable substitution
+- kind: Question
+  prompt: "{Global.DynamicPrompt}"
+```
+
+**Alternative**: Use static text and ConditionGroup branching (if ConditionGroup works in your environment).
+
+### Teams Message and Dataverse Integration
+
+**Tested Pattern for External System Integration**:
+
+```yaml
+# 1. Populate variables first
+- kind: SetVariable
+  id: setVariable_SetDataverseField
+  variable: Topic.copis_agentname
+  value: =Global.AgentName
+
+# 2. Call external systems with input parameters
+- kind: BeginDialog
+  id: beginDialog_CallExternal
+  input:
+    fieldName: =Topic.copis_agentname
+  dialog: your.action.ExternalSystem
+  output:
+    binding:
+      result: Topic.result
+```
+
+**Key Requirements**:
+- Use `input:` section to pass data to external actions
+- Use `output: binding:` to capture returned data
+- Dataverse choice fields require numeric values (e.g., 586220000, not strings)
+
+### Variable Extraction from AI Responses
+
+**Problem**: AI-generated text often includes conversational elements that break variable extraction.
+
+**Tested Solution**:
+```yaml
+# Give AI very specific formatting instructions
+question: |-
+  Create the final agent name and summary. Do NOT ask any questions. Just provide exactly this:
+  
+  **Agent Name:** [Professional name in 2-4 words]
+  
+  **Agent Summary:** [Detailed description]
+  
+  Format exactly as shown. Do not add anything else.
+
+# Then extract with error handling
+- kind: SetVariable
+  id: setVariable_ExtractName
+  variable: Global.AgentName
+  value: =If(Find("**Agent Name:**", Global.AIOutput) > 0, Trim(Mid(Global.AIOutput, Find("**Agent Name:**", Global.AIOutput) + 15, 50)), "Default Name")
+```
+
+### Multi-Topic Architecture Best Practices
+
+**Discovery**: Complex single-topic flows are unreliable. Separate topics work better.
+
+**Recommended Architecture**:
+```
+MainRouter → IdeaFlow OR BuiltFlow → SourcesCollection → FinalApproval
+```
+
+**Each topic should**:
+- Have a single, focused responsibility
+- Use OnUnknownIntent as trigger type
+- Call next topic with BeginDialog
+- Handle its own error states
+
+### AnswerQuestionWithAI Updated Behavior
+
+**Confirmed**: AnswerQuestionWithAI always displays its response automatically. There is no way to suppress this.
+
+**Best Practice**:
+```yaml
+# ✅ Correct - let AI display automatically
+- kind: AnswerQuestionWithAI
+  id: ai_Generate
+  variable: Global.AIResponse
+  question: "Generate content..."
+
+# Continue directly to next action
+- kind: Question
+  id: question_Next
+  prompt: "What's next?"
+
+# ❌ Wrong - creates duplicate
+- kind: SendActivity
+  activity: "{Global.AIResponse}"  # Don't do this!
+```
+
+## Part 9: Environment-Specific Testing Checklist
+
+Before deploying complex flows, test these specific patterns in your environment:
+
+### Test 1: ConditionGroup Functionality
+```yaml
+- kind: SetVariable
+  variable: Global.TestValue
+  value: "TEST"
+
+- kind: ConditionGroup
+  conditions:
+    - id: condition_Test
+      condition: =Global.TestValue = "TEST"
+      actions:
+        - kind: SendActivity
+          activity: "ConditionGroup works!"
+  defaultActions:
+    - kind: SendActivity
+      activity: "ConditionGroup failed!"
+```
+
+**Expected**: Shows "ConditionGroup works!"
+**If Failed**: Use separate topics instead
+
+### Test 2: Power Fx in Text Fields
+```yaml
+- kind: SetVariable
+  variable: Global.TestText
+  value: "Dynamic"
+
+- kind: SendActivity
+  activity: =Concatenate("This is ", Global.TestText, " text")
+```
+
+**Expected**: Shows "This is Dynamic text"
+**If Failed**: Shows raw formula - use variable substitution instead
+
+### Test 3: BeginDialog Between Topics
+```yaml
+# In Topic A
+- kind: BeginDialog
+  dialog: TopicB
+
+# Topic B should execute and return to Topic A
+```
+
+**Expected**: Topic B executes, returns to Topic A
+**If Failed**: Check topic names and trigger types
+
+## Part 10: Production Deployment Guidelines
+
+### Staging Environment Testing
+1. Test each topic individually before connecting them
+2. Test complete flows with real user scenarios  
+3. Verify external system integrations (Dataverse, Teams)
+4. Test error conditions and fallback paths
+
+### Performance Considerations
+- Limit AnswerQuestionWithAI calls (they add latency)
+- Use simple variable operations over complex Power Fx
+- Minimize topic-to-topic calls where possible
+
+### Monitoring and Debugging
+- Add strategic SendActivity debugging messages during development
+- Remove debug messages before production
+- Test with various input patterns (edge cases, unexpected responses)
+- Verify Global variables persist correctly across topic calls
+
+## Summary of Major Guide Corrections
+
+1. **ConditionGroup**: Not reliable in all environments - test thoroughly
+2. **Power Fx in text fields**: May display as raw formulas - use variables instead  
+3. **AnswerQuestionWithAI**: Always displays automatically - don't duplicate
+4. **Multi-topic architecture**: More reliable than complex single-topic flows
+5. **External integrations**: Use input/output parameters, not just Global variables
+
+These discoveries came from extensive real-world testing and should be incorporated into the main guide to prevent others from encountering the same issues.
