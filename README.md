@@ -1,0 +1,1 @@
+# Copilot-yaml-bot-guide
