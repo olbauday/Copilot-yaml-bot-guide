@@ -1,4 +1,4 @@
-# A Practical Guide to Writing Copilot Studio Adaptive Dialog YAML (Updated)
+# A Practical Guide to Writing Copilot Studio Adaptive Dialog YAML (Updated September 2024)
 
 These .yml files are the blueprint for your bot's conversations. They use YAML to define the structure of the conversation and Power Fx to handle the logic.
 
@@ -21,7 +21,9 @@ This is the most important rule in YAML and the source of most errors. Indentati
 # CORRECT ✅
 - kind: Question
   id: question_captureInitialIdea
-  variable: Topic.InitialIdea
+  interruptionPolicy:
+    allowInterruption: true
+  variable: init:Global.InitialIdea
   entity: StringPrebuiltEntity
 ```
 
@@ -52,7 +54,9 @@ beginDialog:
     # Action 2
     - kind: Question
       id: question_askName
-      variable: Topic.UserName
+      interruptionPolicy:
+        allowInterruption: true
+      variable: init:Global.UserName
       entity: StringPrebuiltEntity
       prompt: "What is your name?"
 ```
@@ -64,73 +68,87 @@ Variables are how your bot remembers information. Choosing the right type is cru
 
 | Variable Type | Scope | Use Case |
 |---------------|-------|----------|
-| Topic.VariableName | Current Topic Only | Short-term memory for a single conversational task. It's forgotten once the topic ends. |
 | Global.VariableName | Entire User Session | Long-term memory. Use this to pass information between different topics. |
+| Topic.VariableName | Current Topic Only | Short-term memory for a single conversational task. It's forgotten once the topic ends. |
 | Dialog.VariableName | Internal Processing | Temporary memory for a single turn or a looping dialog. Not meant for passing data between major topics. |
 
-**IMPORTANT: Variable Initialization**
-Copilot Studio requires you to initialize ALL variables before using them in Question actions. **The `init:` prefix is NOT supported and will cause errors.**
+**CRITICAL: The `init:` Prefix Rule**
+In Copilot Studio, **ALL variables used in Question actions MUST have the `init:` prefix**. This is mandatory and cannot be substituted with SetVariable initialization.
 
 ```yaml
-# CORRECT ✅ - Initialize first with SetVariable, then use in Question
+# CORRECT ✅ - Using init: prefix in Questions (REQUIRED)
+- kind: Question
+  id: question_captureAgentIdea
+  interruptionPolicy:
+    allowInterruption: true
+  variable: init:Global.AgentIdea
+  prompt: "What's your agent idea?"
+  entity: StringPrebuiltEntity
+
+# WRONG ❌ - Missing init: prefix causes questions to be silently skipped
+- kind: Question
+  id: question_captureAgentIdea
+  interruptionPolicy:
+    allowInterruption: true
+  variable: Global.AgentIdea          # Missing init: = SKIPPED QUESTION!
+  prompt: "What's your agent idea?"
+  entity: StringPrebuiltEntity
+
+# ALSO WRONG ❌ - SetVariable cannot substitute for init: in Questions
 - kind: SetVariable
   id: setVariable_initAgentIdea
-  variable: Topic.AgentIdea
+  variable: Global.AgentIdea
   value: ""
 
 - kind: Question
   id: question_captureAgentIdea
-  variable: Topic.AgentIdea       # No init: prefix!
-  prompt: "What's your agent idea?"
-  entity: StringPrebuiltEntity
-
-# WRONG ❌ - Using init: prefix causes "InvalidPropertyPath" errors
-- kind: Question
-  id: question_captureAgentIdea
-  variable: init:Topic.AgentIdea  # This will break!
+  interruptionPolicy:
+    allowInterruption: true
+  variable: Global.AgentIdea          # Still missing init: = STILL SKIPPED!
   prompt: "What's your agent idea?"
   entity: StringPrebuiltEntity
 ```
 
 **Variable Rules:**
-- **Never use `init:` prefix** - This causes InvalidPropertyPath errors
-- **Always initialize with SetVariable first** - Create the variable with an empty value
-- **Then use the variable name directly** - No prefixes needed in Questions or other actions
+- **Always use `init:` prefix in Question actions** - This is mandatory for questions to work
+- **Both Global and Topic scopes work** - `init:Global.Name` and `init:Topic.Name` are both valid
+- **SetVariable cannot substitute for init:** - Even pre-initialized variables need the init: prefix in Questions
+- **Use SetVariable for non-Question logic** - For calculations, concatenations, and conditional assignments
 
-### Rule 5: Question Actions Structure
-**CRITICAL**: Every Question action MUST have three required properties:
+### Rule 5: Question Actions Structure - Complete Requirements
+**CRITICAL**: Every Question action MUST have four required properties:
 
-1. `variable:` - Where to store the response (NOT `property:`)
-2. `entity:` - What type of input to expect  
-3. `prompt:` - What to ask the user
+1. `interruptionPolicy:` with `allowInterruption: true` - Without this, questions are skipped
+2. `variable:` with `init:` prefix - Where to store the response
+3. `entity:` - What type of input to expect (lowercase!)
+4. `prompt:` - What to ask the user
 
 ```yaml
-# CORRECT ✅
+# CORRECT ✅ - Complete Question template
 - kind: Question
   id: question_getName
-  variable: Topic.UserName        # Required: where to store response
-  entity: StringPrebuiltEntity    # Required: input type
-  prompt: "What's your name?"     # Required: what to ask
+  interruptionPolicy:
+    allowInterruption: true
+  variable: init:Global.UserName      # Required: init: prefix
+  entity: StringPrebuiltEntity        # Required: lowercase 'entity:'
+  prompt: "What's your name?"         # Required: what to ask
 
-# WRONG ❌ - Missing entity or using wrong capitalization
+# WRONG ❌ - Missing interruptionPolicy (question gets skipped)
 - kind: Question
   id: question_getName
-  variable: Topic.UserName
-  Entity: StringPrebuiltEntity    # Wrong! Should be lowercase 'entity:'
+  variable: init:Global.UserName
+  entity: StringPrebuiltEntity
+  prompt: "What's your name?"
+
+# WRONG ❌ - Wrong capitalization of entity
+- kind: Question
+  id: question_getName
+  interruptionPolicy:
+    allowInterruption: true
+  variable: init:Global.UserName
+  Entity: StringPrebuiltEntity        # Wrong! Should be lowercase 'entity:'
   prompt: "What's your name?"
 ```
-
-**IMPORTANT: Entity Property Capitalization**
-The `entity:` property must be lowercase! Using `Entity:` (capital E) will cause "Unknown element" errors.
-
-**Common Entity Types:**
-- `StringPrebuiltEntity` - For text responses (most common)
-- `BooleanPrebuiltEntity` - For yes/no responses (returns true/false)
-- `NumberPrebuiltEntity` - For numeric input
-- `DateTimePrebuiltEntity` - For dates and times
-- `EmailPrebuiltEntity` - For email addresses
-- `URLPrebuiltEntity` - For web URLs
-- `PhoneNumberPrebuiltEntity` - For phone numbers
 
 **Complete List of Valid Entities from Copilot Studio:**
 ```
@@ -156,10 +174,10 @@ Whenever you see `value: =`, the text that follows is a Power Fx formula.
 
 ```yaml
 # CORRECT ✅
-value: =Concatenate("Hello, ", Topic.UserName, "!")
+value: =Concatenate("Hello, ", Global.UserName, "!")
 
 # WRONG ❌ - & operator not supported in Copilot Studio
-value: ="Hello, " & Topic.UserName & "!"
+value: ="Hello, " & Global.UserName & "!"
 ```
 
 **Line Breaks**: Use `Char(10)` for line breaks in Power Fx formulas.
@@ -175,7 +193,7 @@ value: ="Line 1\nLine 2"
 **Displaying Variables in Messages**: Use curly braces (`{}`) in prompt and SendActivity blocks.
 
 ```yaml
-prompt: "Hello, {Topic.UserName}!"
+prompt: "Hello, {Global.UserName}!"
 ```
 
 **Multi-line Text**: For long prompts, use the pipe symbol (`|`) and a hyphen (`-`).
@@ -183,13 +201,34 @@ prompt: "Hello, {Topic.UserName}!"
 ```yaml
 prompt: |-
   Here is your summary:
-  **Name:** {Topic.AgentName}
-  **Status:** {Topic.AgentStatus}
+  **Name:** {Global.AgentName}
+  **Status:** {Global.AgentStatus}
 ```
 
-## Part 3: Troubleshooting Common Errors (Updated)
+## Part 3: Troubleshooting Common Errors (Updated with Current Knowledge)
 
-### Error 1: "Unknown element at path Triggers[0]" 
+### Error 1: Questions Being Silently Skipped (Most Common Issue)
+**Root Cause**: Missing required properties in Question actions.
+
+**The Complete Fix - Use This Exact Template:**
+```yaml
+# REQUIRED TEMPLATE ✅ - Use this for ALL Questions
+- kind: Question
+  id: question_DescriptiveName
+  interruptionPolicy:
+    allowInterruption: true
+  variable: init:Global.VariableName    # or init:Topic.VariableName
+  prompt: "Your question text here"
+  entity: StringPrebuiltEntity
+```
+
+**Common Causes of Skipped Questions:**
+- Missing `interruptionPolicy` block
+- Missing `init:` prefix in variable
+- Wrong capitalization of `entity` (must be lowercase)
+- Using SetVariable instead of `init:` prefix
+
+### Error 2: "Unknown element at path Triggers[0]" 
 **Root Cause**: Using incorrect dialog structure.
 
 **The Correct Structure for Copilot Studio:**
@@ -205,28 +244,10 @@ beginDialog:
 
 **Valid Trigger Kinds:**
 - `OnUnknownIntent` - Most reliable for general-purpose bots that respond to any user input
-- `OnRecognizedIntent` - When you have specific trigger phrases with `triggerQueries`
 - `OnConversationStart` - For initial greetings (may not work reliably in all contexts)
+- `OnRecognizedIntent` - When you have specific trigger phrases with `triggerQueries`
 
-**Working Example with OnRecognizedIntent:**
-```yaml
-kind: AdaptiveDialog
-beginDialog:
-  kind: OnRecognizedIntent
-  id: main
-  intent:
-    displayName: Agent Creator
-    triggerQueries:
-      - Create an agent
-      - New agent
-      - I want to create an agent
-  actions:
-    - kind: SendActivity
-      id: sendActivity_Welcome
-      activity: "Welcome to the Agent Creator!"
-```
-
-### Error 2: "Unknown element at path BeginDialog.Actions.Actions[X].Entity"
+### Error 3: "Unknown element at path BeginDialog.Actions.Actions[X].Entity"
 **Root Cause**: Incorrect capitalization or invalid entity type.
 
 **The Most Common Cause - Wrong Capitalization:**
@@ -234,52 +255,53 @@ beginDialog:
 # WRONG ❌ - Capital 'E' in Entity
 - kind: Question
   id: question_getName
-  variable: Topic.UserName
-  Entity: StringPrebuiltEntity    # Should be lowercase!
+  interruptionPolicy:
+    allowInterruption: true
+  variable: init:Global.UserName
+  Entity: StringPrebuiltEntity        # Should be lowercase!
   prompt: "What's your name?"
 
 # CORRECT ✅ - Lowercase 'entity'
 - kind: Question
   id: question_getName
-  variable: Topic.UserName
-  entity: StringPrebuiltEntity    # Correct lowercase
+  interruptionPolicy:
+    allowInterruption: true
+  variable: init:Global.UserName
+  entity: StringPrebuiltEntity        # Correct lowercase
   prompt: "What's your name?"
 ```
 
-**Valid Entity Types:**
-Make sure you're using exactly one of these supported entity types:
-- `StringPrebuiltEntity`, `BooleanPrebuiltEntity`, `NumberPrebuiltEntity`
-- `EmailPrebuiltEntity`, `URLPrebuiltEntity`, `PhoneNumberPrebuiltEntity`
-- `DateTimePrebuiltEntity`, `MoneyPrebuiltEntity`, `PercentagePrebuiltEntity`
-- And many others (see Rule 5 for complete list)
+### Error 4: BooleanPrebuiltEntity Issues (Updated Understanding)
+**Previous Issue**: BooleanPrebuiltEntity was thought to be unreliable with natural language.
 
-### Error 3: "SystemError" or Re-prompting Loops with BooleanPrebuiltEntity
-**Root Cause**: The BooleanPrebuiltEntity is extremely brittle. It expects a clear "Yes" or "No" response. Natural language from the user, such as "yes, please continue" or "it will be connected to a sharepoint list", will fail validation, causing the bot to get stuck and repeat the question.
-
-**CRITICAL**: Avoid BooleanPrebuiltEntity for most conversational flows. It is almost always better to use a StringPrebuiltEntity and a ConditionGroup to check for positive keywords. This makes your bot far more robust.
+**Current Reality**: With correct syntax (init: prefix and interruptionPolicy), BooleanPrebuiltEntity works reliably for clear yes/no questions.
 
 ```yaml
-# AVOID ❌ - Fails with natural language, causes re-prompting loops
+# WORKS RELIABLY ✅ - With correct syntax
 - kind: Question
-  variable: Topic.Confirmation
+  id: question_Confirmation
+  interruptionPolicy:
+    allowInterruption: true
+  variable: init:Global.IsConfirmed
+  prompt: "Do you want to continue? (Please answer Yes or No)"
   entity: BooleanPrebuiltEntity
-  prompt: "Does this agent use data sources?"
 
-# PREFER ✅ - Handles flexible user input
+# For more flexible responses, still prefer StringPrebuiltEntity with conditions
 - kind: Question
-  variable: Topic.ConfirmationText
+  id: question_FlexibleConfirmation
+  interruptionPolicy:
+    allowInterruption: true
+  variable: init:Global.ConfirmationText
+  prompt: "Do you want to continue? Please let me know."
   entity: StringPrebuiltEntity
-  prompt: "Does this agent use any data sources?"
 
 - kind: ConditionGroup
   conditions:
     - id: condition_IsPositive
-      condition: =Or(Find("yes", Lower(Topic.ConfirmationText)) > 0, Find("sharepoint", Lower(Topic.ConfirmationText)) > 0)
-      actions:
-        # ... handle the "yes" case ...
+      condition: =Or(Find("yes", Lower(Global.ConfirmationText)) > 0, Find("continue", Lower(Global.ConfirmationText)) > 0, Find("proceed", Lower(Global.ConfirmationText)) > 0)
 ```
 
-### Error 4: "UnexpectedToken near line X" - YAML Formatting
+### Error 5: "UnexpectedToken near line X" - YAML Formatting
 **Root Cause**: YAML formatting issues - missing quotes, wrong indentation, or malformed strings.
 
 **Common Fixes:**
@@ -306,119 +328,30 @@ actions:
     id: test
 ```
 
-### Error 8: "Response variable is missing" on a Question
-**Root Cause**: ConditionGroup blocks without explicit defaultActions can silently fail when conditions aren't met.
+### Error 6: Power Fx Display Issues
+**Root Cause**: Complex Power Fx formulas in SendActivity not displaying properly.
 
-**Solution**: Always provide explicit paths for both true and false cases:
-
-```yaml
-# RISKY ❌ - Missing defaultActions can cause silent failures
-- kind: ConditionGroup
-  id: if_UserWantsFeature
-  conditions:
-    - id: condition_CheckFeature
-      condition: =Topic.UserInput = "yes"
-      actions:
-        # ... handle yes case ...
-  # No defaultActions! What happens if condition is false?
-
-# ROBUST ✅ - Explicit handling for all cases
-- kind: ConditionGroup
-  id: if_UserWantsFeature
-  conditions:
-    - id: condition_CheckFeature
-      condition: =Topic.UserInput = "yes"
-      actions:
-        # ... handle yes case ...
-  defaultActions:
-    # ... explicitly handle no/other cases ...
-```
-**Root Cause**: Using unsupported variable scopes or mixing scopes incorrectly.
-
-**Solutions:**
-```yaml
-# AVOID ❌ - Dialog scope often causes "isn't recognized" errors
-variable: Dialog.SourceName
-
-# PREFER ✅ - Topic scope for most use cases
-variable: Topic.SourceName
-
-# USE SPARINGLY ✅ - Global only when you need persistence across topics
-variable: Global.UserPreferences
-```
-
-**Scope Guidelines:**
-- **`Topic.`** - Use for 95% of variables (current conversation)
-- **`Global.`** - Only when you need data to persist across different topics
-- **`Dialog.`** - Avoid - often causes recognition errors
-**Root Cause**: Missing `entity` property on Question actions.
-
-**Solution**: Always include the `entity` property to define what type of input you expect.
+**Solution**: Use `{VariableName}` syntax in activity text instead of complex formulas.
 
 ```yaml
-# CORRECT ✅
-- kind: Question
-  id: question_GetInput
-  variable: Topic.UserInput
-  entity: StringPrebuiltEntity  # This is required!
-  prompt: "Please enter your response:"
+# AVOID ❌ - Complex Power Fx in activities can display as raw formulas
+activity: =Concatenate("Hello ", Global.UserName, ", your agent: ", Global.AgentName)
+
+# PREFER ✅ - Variable substitution with curly braces
+activity: "Hello {Global.UserName}, your agent: {Global.AgentName}"
+
+# Or use SetVariable first for complex formulas
+- kind: SetVariable
+  id: setVariable_CreateMessage
+  variable: Global.WelcomeMessage
+  value: =Concatenate("Hello ", Global.UserName, ", your agent: ", Global.AgentName)
+
+- kind: SendActivity
+  id: sendActivity_ShowMessage
+  activity: "{Global.WelcomeMessage}"
 ```
 
-### Error 2: "Unknown element at path Triggers[0]" 
-**Root Cause**: Using incorrect dialog structure or wrong trigger kinds.
-
-**Two Common Causes:**
-
-**A) Wrong Root Structure:**
-```yaml
-# WRONG ❌ - Using beginDialog (from older versions)
-kind: AdaptiveDialog
-beginDialog:
-  kind: OnConversationStart
-  id: main
-
-# CORRECT ✅ - Using triggers array
-kind: AdaptiveDialog
-triggers:
-  - kind: OnConversationStart
-    id: main
-    actions:
-      # ... your actions here
-```
-
-**B) Wrong Trigger Kind:**
-- `OnConversationStart`: Use this only for the main topic that kicks off a conversation with the user
-- `OnUnknownIntent`: Use this for fallback/default responses  
-- `OnDialogStart`: Use this only for a sub-topic called from another topic via BeginDialog
-
-**Valid Trigger Kinds in Copilot Studio:**
-- `OnConversationStart` - When conversation begins
-- `OnUnknownIntent` - When user input doesn't match any intent
-- `OnActivity` - For specific activity types
-- `OnError` - Error handling
-- `OnSignIn` - Authentication events
-- `OnSystemIntent` - System-generated intents
-- `OnEscalate` - Escalation to human agents
-
-**Complete Correct Structure:**
-```yaml
-kind: AdaptiveDialog
-beginDialog:
-  kind: OnUnknownIntent
-  id: main
-  actions:
-    - kind: SendActivity
-      id: sendActivity_Welcome
-      activity: "Hello! Welcome to our bot."
-    
-    - kind: Question
-      id: question_GetName
-      variable: Topic.UserName
-      entity: StringPrebuiltEntity
-      prompt: "What's your name?"
-```
-
-### Error 3: Conditional Logic Requirements
+### Error 7: Conditional Logic Requirements
 **CRITICAL**: Every condition in a `ConditionGroup` MUST have an `id` property.
 
 ```yaml
@@ -427,7 +360,7 @@ beginDialog:
   id: if_IsNewIdea
   conditions:
     - id: condition_IsIdea              # Required id!
-      condition: =Topic.AgentStatus = "This is just an idea"
+      condition: =Find("idea", Lower(Global.AgentStatus)) > 0
       actions:
         # ... actions if true
   defaultActions:
@@ -437,96 +370,50 @@ beginDialog:
 - kind: ConditionGroup
   id: if_IsNewIdea
   conditions:
-    - condition: =Topic.AgentStatus = "This is just an idea"  # Missing id!
+    - condition: =Find("idea", Lower(Global.AgentStatus)) > 0  # Missing id!
       actions:
         # ... actions if true
 ```
 
-### Error 4: Power Fx Function Compatibility
-**Not all Power Fx functions work in Copilot Studio**. Here are the key differences:
+## Part 4: Best Practices (Updated)
 
-**Text Operations:**
-```yaml
-# CORRECT ✅ - Supported functions
-=Concatenate(text1, text2, text3)
-=IsBlank(variable)
-=Char(10)  # for line breaks
-
-# WRONG ❌ - Not supported in Copilot Studio
-=text1 & text2 & text3    # Use Concatenate() instead
-=IsEmpty(variable)         # Use IsBlank() instead
-="\n"                      # Use Char(10) instead
-```
-
-**Table Operations:**
-```yaml
-# AVOID ❌ - Complex table operations often cause issues
-=Patch(Global.Sources, Defaults(Global.Sources), {Name: value})
-=Concat(Global.Sources, "**- Name:** " & ThisRecord.Name)
-
-# PREFER ✅ - Simple string concatenation
-=Concatenate(Global.ExistingData, "New item: ", Topic.NewValue, Char(10))
-```
-
-## Part 4: Best Practices (New Section)
-
-### Practice 1: Always Initialize Variables
-Initialize ALL variables before using them in Question actions:
+### Practice 1: Use the Complete Question Template
+Always use this exact template for reliable Question actions:
 
 ```yaml
-# Initialize all variables at the start
-- kind: SetVariable
-  id: setVariable_initName
-  variable: Topic.UserName
-  value: ""
-
-- kind: SetVariable
-  id: setVariable_initEmail
-  variable: Topic.UserEmail
-  value: ""
-
-# Then use them in questions
 - kind: Question
-  id: question_getName
-  variable: Topic.UserName
-  entity: StringPrebuiltEntity
-  prompt: "What's your name?"
+  id: question_DescriptiveName
+  interruptionPolicy:
+    allowInterruption: true
+  variable: init:Global.VariableName  # or init:Topic.VariableName
+  prompt: "Clear, specific question text"
+  entity: StringPrebuiltEntity        # Choose appropriate entity type
 ```
 
 ### Practice 2: Smart Entity Selection
-Choose entity types based on real user behavior, not ideal responses:
+Choose entity types based on real user behavior and question clarity:
 
 ```yaml
-# AVOID ❌ - Rigid entity types that break with natural language
+# For clear yes/no questions - BooleanPrebuiltEntity works well
 - kind: Question
-  variable: Topic.Confirmation
-  prompt: "Is this correct? (Yes/No)"
-  entity: BooleanPrebuiltEntity  # Breaks if user elaborates
+  id: question_SimpleConfirmation
+  interruptionPolicy:
+    allowInterruption: true
+  variable: init:Global.IsConfirmed
+  prompt: "Do you want to continue? (Please answer Yes or No)"
+  entity: BooleanPrebuiltEntity
 
-# PREFER ✅ - Flexible entities with smart parsing
+# For flexible responses - use StringPrebuiltEntity with smart parsing
 - kind: Question
-  variable: Topic.ConfirmationText
-  prompt: "Is this correct? Please confirm or let me know what to change."
+  id: question_FlexibleInput
+  interruptionPolicy:
+    allowInterruption: true
+  variable: init:Global.UserResponse
+  prompt: "Tell me about your requirements:"
   entity: StringPrebuiltEntity
-
-- kind: ConditionGroup
-  conditions:
-    - id: condition_IsPositive
-      condition: =Or(Find("yes", Lower(Topic.ConfirmationText)) > 0, Find("correct", Lower(Topic.ConfirmationText)) > 0, Find("good", Lower(Topic.ConfirmationText)) > 0)
 ```
 
-### Practice 3: Simple Prompt Design
-Avoid complex dynamic prompts that can cause parsing errors:
-
-```yaml
-# AVOID ❌ - Complex dynamic prompts
-prompt: =Concatenate("What is the URL for '", Dialog.SourceName, "'? Please include the full path.")
-
-# PREFER ✅ - Simple static prompts
-prompt: "What is the URL for this data source?"
-```
-
-### Practice 6: Incremental Testing Strategy
+### Practice 3: Simple and Predictable Flow Design
 **The most common source of logical errors is trying to be too clever with conversation flow.** While features like GotoAction exist, they are unreliable for major jumps. The most stable and predictable structure is a simple "waterfall" that uses nested ConditionGroup blocks.
 
 This often means you will have to repeat sections of your logic. While this makes the YAML file longer, it makes the bot's behavior predictable and easy to debug.
@@ -534,67 +421,58 @@ This often means you will have to repeat sections of your logic. While this make
 **Remember: A long, simple, predictable file is better than a short, clever, broken one.**
 
 ```yaml
-# UNRELIABLE ❌ - Trying to jump to a shared section
-actions:
-  - kind: ConditionGroup
-    conditions:
-      - id: condition_isPathA
-        actions:
-          # ... do Path A logic ...
-          - kind: GotoAction
-            actionId: data_source_logic  # RISKY JUMP
-    defaultActions:
-      # ... do Path B logic ...
-      - kind: GotoAction
-        actionId: data_source_logic      # RISKY JUMP
+# UNRELIABLE ❌ - Trying to jump to shared sections
+- kind: ConditionGroup
+  conditions:
+    - id: condition_isPathA
+      actions:
+        # ... do Path A logic ...
+        - kind: GotoAction
+          actionId: shared_logic  # RISKY JUMP
 
-# Shared logic that is hard to jump to reliably
-- kind: Question
-  id: data_source_logic
-  # ...
-
-# ROBUST ✅ - Repeating the logic inside each path
-actions:
-  - kind: ConditionGroup
-    conditions:
-      - id: condition_isPathA
-        actions:
-          # ... do Path A logic ...
-          # --- COPIED DATA SOURCE LOGIC ---
-          - kind: Question
-            id: data_source_logic_PathA
-            # ... (duplicated but reliable)
-    defaultActions:
-      # ... do Path B logic ...
-      # --- COPIED DATA SOURCE LOGIC ---
-      - kind: Question
-        id: data_source_logic_PathB
-        # ... (duplicated but reliable)
+# ROBUST ✅ - Duplicate logic within each path
+- kind: ConditionGroup
+  conditions:
+    - id: condition_isPathA
+      actions:
+        # ... do Path A logic ...
+        # --- DUPLICATED BUT RELIABLE LOGIC ---
+        - kind: Question
+          id: question_PathASpecific
+          interruptionPolicy:
+            allowInterruption: true
+          variable: init:Global.PathAData
+          prompt: "Path A specific question"
+          entity: StringPrebuiltEntity
+  defaultActions:
+    # ... do Path B logic ...
+    # --- DUPLICATED BUT RELIABLE LOGIC ---
+    - kind: Question
+      id: question_PathBSpecific
+      interruptionPolicy:
+        allowInterruption: true
+      variable: init:Global.PathBData
+      prompt: "Path B specific question"
+      entity: StringPrebuiltEntity
 ```
 
-**Key Principles:**
-- **Simple and repetitive is better than complex and clever**
-- **Nest logic within ConditionGroups rather than jumping between sections**
-- **Duplicate code blocks rather than trying to share them via GotoAction**
-- **Keep related logic together in the same conditional block**
-Avoid complex table operations. Use simple string concatenation for lists:
+### Practice 4: Incremental Testing Strategy
+Build your bot step by step:
+1. Start with basic welcome message and one question
+2. Test each question individually before adding the next
+3. Add conditional logic only after all questions work
+4. Test each branch separately
 
-```yaml
-# Instead of complex table operations, use simple strings
-- kind: SetVariable
-  id: setVariable_addToList
-  variable: Global.ItemList
-  value: =Concatenate(Global.ItemList, "- ", Topic.NewItem, Char(10))
-```
+This approach helps identify exactly where errors occur.
 
-### Practice 3: Consistent Naming Convention
+### Practice 5: Consistent Naming Convention
 Use descriptive, consistent IDs:
 
 ```yaml
 # Good naming patterns
 - kind: Question
   id: question_GetUserName          # Clear purpose
-  
+
 - kind: SetVariable
   id: setVariable_InitUserData      # Clear action
 
@@ -604,127 +482,198 @@ Use descriptive, consistent IDs:
     - id: condition_IsRegistered    # Clear condition name
 ```
 
-### Practice 4: Test Incrementally
-Build your bot step by step:
-1. Start with basic welcome message
-2. Add one question at a time
-3. Test each addition before continuing
-4. Add conditional logic last
+## Part 5: Supported vs Unsupported Features (Updated)
 
-This approach helps identify exactly where errors occur.
+### ✅ Fully Supported and Reliable
+- **SendActivity** - Send messages to users
+- **Question** - Ask for user input (with correct syntax)
+- **SetVariable** - Store and manipulate values
+- **ConditionGroup** - If/else logic with proper structure
+- **BeginDialog** - Call other topics
+- **EndDialog** - End conversation cleanly
+- **BooleanPrebuiltEntity** - Works reliably with correct syntax
+- **StringPrebuiltEntity** - Most versatile for user input
+- **NumberPrebuiltEntity** - Numeric input validation
 
-## Part 6: Supported vs Unsupported Features
+### ⚠️ Use With Caution
+- **GotoAction** - Only for simple loops back to recent questions, unreliable for complex flow control
+- **AnswerQuestionWithAI** - Good for conversational content generation, NOT for structured data that needs parsing
+- **Dialog scope variables** - Can cause recognition errors, prefer Global or Topic scope
 
-### AnswerQuestionWithAI Action ⚠️ LIMITED USE CASES
-This action uses AI to generate responses. **It is best used for creative or conversational tasks, NOT for reliable data extraction.**
+### ❌ Unsupported or Unreliable
+- **Complex GotoAction flows** - Causes silent failures and unpredictable behavior
+- **`DoWhile` loops** - Not supported in Copilot Studio
+- **Complex Power Fx table operations** - Often cause errors, use simple string concatenation instead
+- **Questions without `init:` prefix** - Will be silently skipped
+- **Questions without `interruptionPolicy`** - Will be silently skipped
+- **Using SetVariable as substitute for `init:`** - Does not work
 
-**CRITICAL WARNING**: Do not use this action to generate structured data that you intend to parse into variables. The AI's output format is not guaranteed, even with very strict prompts. It will often include conversational text that breaks parsing logic (e.g., using Split()).
+## Part 6: Working Examples
 
-**GOOD USE CASES ✅:**
-- Summarizing a topic in a friendly paragraph
-- Brainstorming ideas for a user  
-- Rephrasing text into a different tone
-
-**BAD USE CASES ❌:**
-- Trying to make it output JSON
-- Expecting a strict KEY: VALUE format to populate variables
-- Any structured data that needs to be parsed
-
+### Complete Minimal Bot
 ```yaml
-# GOOD ✅ - Conversational content generation
-- kind: AnswerQuestionWithAI
-  id: ai_SummarizeIdea
-  variable: Topic.FriendlySummary
-  userInput: =Topic.UserIdea
-  question: "Summarize this idea in a friendly, encouraging paragraph"
+kind: AdaptiveDialog
+beginDialog:
+  kind: OnUnknownIntent
+  id: main
+  actions:
+    - kind: SendActivity
+      id: sendActivity_Welcome
+      activity: "Welcome to our bot!"
 
-# BAD ❌ - Trying to generate structured data
-- kind: AnswerQuestionWithAI
-  id: ai_GenerateStructured
-  variable: Topic.ParsedData
-  userInput: =Topic.UserIdea
-  question: "Generate this in format: NAME: [name]\nSUMMARY: [summary]"
-  # The AI will often add extra text that breaks parsing!
+    - kind: Question
+      id: question_GetName
+      interruptionPolicy:
+        allowInterruption: true
+      variable: init:Global.UserName
+      prompt: "What's your name?"
+      entity: StringPrebuiltEntity
+
+    - kind: Question
+      id: question_GetAge
+      interruptionPolicy:
+        allowInterruption: true
+      variable: init:Global.UserAge
+      prompt: "How old are you?"
+      entity: NumberPrebuiltEntity
+
+    - kind: SendActivity
+      id: sendActivity_Summary
+      activity: "Nice to meet you, {Global.UserName}! You are {Global.UserAge} years old."
+
+    - kind: EndDialog
+      id: endDialog_Complete
 ```
 
-**Alternative**: Instead of using AI to generate structured summaries, ask the user specific questions and build the summary yourself using Concatenate().
-
-### GotoAction for Flow Control ⚠️ UNRELIABLE
-While GotoAction exists to create loops or jump between actions, **it is unreliable and not recommended for complex flows.** In testing, it causes silent failures and unexpected crashes. The property name (actionId vs. targetActionId) is also inconsistent.
-
-**Limited Acceptable Use**: Simple, self-contained loops where you jump back to a recent question.
-
-**Better Approach**: Prefer nesting logic inside ConditionGroup blocks, even if it means repeating code.
-
+### Conditional Logic Example
 ```yaml
-# USE WITH CAUTION ✅ - Simple loop back to recent step
-- kind: Question
-  id: question_GetSourceName
-  # ... ask for source name ...
-  
-- kind: Question
-  id: question_AddAnotherSource
-  # ... ask to add another ...
-  
-- kind: ConditionGroup
-  conditions:
-    - id: condition_WantsToAddAnother
-      condition: =Topic.AddAnotherSourceResponse = true
-      actions:
-        # This jump backwards to a recent step is usually safe
-        - kind: GotoAction
-          actionId: question_GetSourceName
+kind: AdaptiveDialog
+beginDialog:
+  kind: OnUnknownIntent
+  id: main
+  actions:
+    - kind: Question
+      id: question_GetPreference
+      interruptionPolicy:
+        allowInterruption: true
+      variable: init:Global.UserPreference
+      prompt: "Do you prefer cats or dogs?"
+      entity: StringPrebuiltEntity
 
-# AVOID ❌ - Jumping across major logical blocks
-- kind: ConditionGroup
-  conditions:
-    - id: condition_isPathA
-      actions:
-        # ... logic for Path A ...
-        - kind: GotoAction  # This is UNRELIABLE!
-          actionId: some_action_far_down_the_file
+    - kind: ConditionGroup
+      id: if_LikesCats
+      conditions:
+        - id: condition_CatLover
+          condition: =Find("cat", Lower(Global.UserPreference)) > 0
+          actions:
+            - kind: SendActivity
+              id: sendActivity_CatResponse
+              activity: "Great! Cats are wonderful companions! 🐱"
+        - id: condition_DogLover
+          condition: =Find("dog", Lower(Global.UserPreference)) > 0
+          actions:
+            - kind: SendActivity
+              id: sendActivity_DogResponse
+              activity: "Awesome! Dogs are amazing friends! 🐕"
+      defaultActions:
+        - kind: SendActivity
+          id: sendActivity_NeutralResponse
+          activity: "Both cats and dogs make great pets!"
+
+    - kind: EndDialog
+      id: endDialog_Complete
 ```
 
-### BooleanPrebuiltEntity for Yes/No Questions
-For true/false responses, use BooleanPrebuiltEntity:
-
+### Data Collection Example
 ```yaml
-- kind: Question
-  id: question_confirmDraft
-  variable: Topic.IdeaApproved
-  prompt: "Does this look right to you? (Please answer with Yes or No)"
-  entity: BooleanPrebuiltEntity  # Returns true/false
+kind: AdaptiveDialog
+beginDialog:
+  kind: OnUnknownIntent
+  id: main
+  actions:
+    - kind: Question
+      id: question_GetName
+      interruptionPolicy:
+        allowInterruption: true
+      variable: init:Global.CustomerName
+      prompt: "What's your name?"
+      entity: StringPrebuiltEntity
+
+    - kind: Question
+      id: question_GetEmail
+      interruptionPolicy:
+        allowInterruption: true
+      variable: init:Global.CustomerEmail
+      prompt: "What's your email address?"
+      entity: EmailPrebuiltEntity
+
+    - kind: Question
+      id: question_GetFeedback
+      interruptionPolicy:
+        allowInterruption: true
+      variable: init:Global.CustomerFeedback
+      prompt: "Please share your feedback about our service:"
+      entity: StringPrebuiltEntity
+
+    # Build summary
+    - kind: SetVariable
+      id: setVariable_CreateSummary
+      variable: Global.CustomerSummary
+      value: =Concatenate("Customer: ", Global.CustomerName, Char(10), "Email: ", Global.CustomerEmail, Char(10), "Feedback: ", Global.CustomerFeedback)
+
+    - kind: SendActivity
+      id: sendActivity_ShowSummary
+      activity: |-
+        Thank you for your feedback! Here's what we received:
+
+        {Global.CustomerSummary}
+
+    - kind: EndDialog
+      id: endDialog_Complete
 ```
 
-### EndDialog Action
-Use EndDialog to cleanly end the conversation or topic:
+## Part 7: Critical Reminders for Success
 
-```yaml
-- kind: EndDialog
-  id: endDialog_thisTopic
-```
+1. **ALWAYS use the complete Question template** - Missing any required property causes silent failures
+2. **NEVER skip the `init:` prefix** - Questions without it will be skipped entirely  
+3. **ALWAYS include `interruptionPolicy`** - Questions without it will be skipped entirely
+4. **Use lowercase `entity:`** - Capital E causes "Unknown element" errors
+5. **Test incrementally** - Add one question at a time and test before continuing
+6. **Keep flows simple and predictable** - Duplicate logic rather than using complex jumps
+7. **Use `{VariableName}` in activities** - Avoid complex Power Fx formulas in display text
+8. **Every condition needs an `id`** - Missing condition IDs cause errors
 
-### ✅ Supported Action Kinds
-- `SendActivity` - Send messages
-- `Question` - Ask for user input
-- `SetVariable` - Store values
-- `ConditionGroup` - If/else logic
-- `BeginDialog` - Call other topics
-- `EndDialog` - End conversation
+## Part 8: Debugging Checklist
 
-### ❌ Commonly Attempted But Unsupported
-- `DoWhile` loops - Not supported
-- `BreakLoop` - Only works in supported loop contexts  
-- `IfCondition` - Use `ConditionGroup` instead
-- **`init:` prefix in variable names** - Causes InvalidPropertyPath errors
-- **Complex GotoAction flows** - Unreliable for major jumps, causes silent failures
-- **AnswerQuestionWithAI for structured data** - Output format not guaranteed, breaks parsing
-- Complex Power Fx table operations
-- `Dialog.` scope variables - Often cause recognition errors
+When your bot isn't working:
 
-### ⚠️ Use With Extreme Caution
-- **GotoAction** - Only for simple loops back to recent questions
-- **BooleanPrebuiltEntity** - Extremely brittle with natural language input
-- **AnswerQuestionWithAI** - Only for conversational content, not data extraction
+**Questions being skipped?**
+- ✅ Check for `interruptionPolicy` block
+- ✅ Check for `init:` prefix in variable
+- ✅ Check `entity:` is lowercase
+- ✅ Check all required properties are present
 
-Remember: Copilot Studio is more restrictive than Power Platform flows, so simpler approaches often work better!
+**Getting "Unknown element" errors?**
+- ✅ Check YAML indentation (exactly 2 spaces per level)
+- ✅ Check entity names are spelled correctly
+- ✅ Check condition IDs are present
+- ✅ Check for proper quotes around strings with special characters
+
+**Conditional logic not working?**
+- ✅ Check every condition has an `id` property
+- ✅ Check Power Fx syntax in conditions
+- ✅ Check `defaultActions` is present for fallback behavior
+- ✅ Test each condition branch separately
+
+**Variables not displaying?**
+- ✅ Use `{VariableName}` syntax in activity text
+- ✅ Check variable names match exactly (case sensitive)
+- ✅ Avoid complex Power Fx formulas in SendActivity
+
+**Bot behavior unpredictable?**
+- ✅ Avoid complex GotoAction flows
+- ✅ Use simple waterfall structure with nested conditions
+- ✅ Test each section independently
+- ✅ Keep logic within single ConditionGroup blocks when possible
+
+This guide reflects the current, tested, and verified syntax for Copilot Studio as of September 2024. Following these patterns will result in reliable, predictable bot behavior.
