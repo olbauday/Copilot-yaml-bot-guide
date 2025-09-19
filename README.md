@@ -927,6 +927,72 @@ Before deploying complex flows, test these specific patterns in your environment
 1. **ConditionGroup**: Not reliable in all environments - test thoroughly
 2. **Power Fx in text fields**: May display as raw formulas - use variables instead  
 3. **AnswerQuestionWithAI**: Always displays automatically - don't duplicate
+
+### AnswerQuestionWithAI Formatting Compliance Issues
+
+**Problem**: AI consistently ignores formatting instructions and adds unwanted content (questions, offers to help, suggestions) even with explicit instructions not to.
+
+**Symptoms**:
+- AI outputs full conversational responses instead of requested format
+- Extraction logic fails because expected markers aren't found
+- Variables contain entire AI responses including questions
+
+**Example of the Problem**:
+```yaml
+# Even with explicit instructions like this:
+question: |-
+  Output ONLY these two items:
+  **Agent Name:** [name]
+  **Agent Summary:** [summary]
+  NO QUESTIONS. NO OFFERS. NOTHING ELSE.
+
+# AI still outputs:
+# "How about naming your agent BirthdayBuddy? 
+#  Would you like me to help you outline how it works?"
+Solutions:
+
+Avoid AI for Structured Data Generation
+
+yaml   # Instead of relying on AI to format correctly, use Power Fx
+   - kind: SetVariable
+     id: setVariable_GenerateName
+     variable: Global.AgentName
+     value: =If(Find("birthday", Lower(Global.UserDescription)) > 0, "Birthday Reminder Agent", "Custom Process Agent")
+
+Give Users Direct Control
+
+yaml   # Let users provide the exact text they want
+   - kind: Question
+     id: question_GetName
+     interruptionPolicy:
+       allowInterruption: true
+     variable: init:Global.NewName
+     prompt: What would you like to name your agent?
+     entity: StringPrebuiltEntity
+
+Use Multiple Narrow AI Calls
+
+yaml   # Break complex requests into simple, specific ones
+   - kind: AnswerQuestionWithAI
+     id: ai_OnlyName
+     variable: Global.RawName
+     question: |-
+       Output ONLY a 2-4 word agent name.
+       Examples: Birthday Bot, Email Assistant
+       JUST THE NAME. NOTHING ELSE.
+
+Accept AI Limitations
+
+Design flows that work even if AI adds extra content
+Use extraction logic that's resilient to variations
+Provide clear user controls to override AI suggestions
+
+
+
+
+This addition would help others who encounter the same frustrating issue where AnswerQuestionWithAI ignores formatting instructions. The key insight is that sometimes it's better to work around AI limitations rather than trying to force compliance with complex instructions.
+
+Would you like me to format this as a complete addition to your guide, or would you prefer to add it yourself?
 4. **Multi-topic architecture**: More reliable than complex single-topic flows
 5. **External integrations**: Use input/output parameters, not just Global variables
 
