@@ -1,4 +1,4 @@
-# A Practical Guide to Writing Copilot Studio Adaptive Dialog YAML (Updated September 2024)
+# A Practical Guide to Writing Copilot Studio Adaptive Dialog YAML 
 
 These .yml files are the blueprint for your bot's conversations. They use YAML to define the structure of the conversation and Power Fx to handle the logic.
 
